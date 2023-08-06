@@ -1,7 +1,7 @@
 use ethers::{
     abi::Address,
     prelude::*,
-    utils::{format_units, to_checksum},
+    utils::{format_units, to_checksum,parse_units},
 };
 use eyre::Result;
 use futures::future::try_join_all;
@@ -21,6 +21,9 @@ struct ChainData {
     rpc_url: String,
     booster_address: String,
     from_block: U64,
+    booster_total: f64,
+    aidrop_total: f64,
+    match_rate: f64,
 }
 
 enum Chain {
@@ -55,24 +58,33 @@ async fn main() -> Result<()> {
         rpc_url: FANTOM_RPC_URL.to_string(),
         booster_address: FANTOM_BOOSTER_ADDRESS.to_string(),
         from_block: U64::from(66450156),
+        booster_total: 5263.0,
+        aidrop_total: 210000.0,
+        match_rate: 1.02,
     });
     let canto_chain = Chain::Canto(ChainData {
         id: 7700,
         rpc_url: CANTO_RPC_URL.to_string(),
         booster_address: CANTO_BOOSTER_ADDRESS.to_string(),
         from_block: U64::from(5313097),
+        booster_total: 1000.0,
+        aidrop_total:  210000.0,
+        match_rate:  1.01,
     });
     let pulse_chain = Chain::Pulse(ChainData {
         id: 369,
         rpc_url: PULSE_RPC_URL.to_string(),
         booster_address: PULSE_BOOSTER_ADDRESS.to_string(),
         from_block: U64::from(17917480),
+        booster_total: 2359213.0,
+        aidrop_total: 120000.0,
+        match_rate: 1.01,
     });
 
     let chains = vec![fantom_chain, canto_chain, pulse_chain];
 
     for chain in chains {
-        println!("Starting chain {}", chain.get_chain_data().id);
+        println!("Chain {}", chain.get_chain_data().id);
         write_logs_data(chain).await?;
     }
 
@@ -102,7 +114,7 @@ async fn write_logs_data(chain: Chain) -> Result<()> {
     let time = Instant::now();
 
     while let Some(chunk) = ranges_chunks.next() {
-        println!("Processing next chunk");
+        //println!("Processing next chunk");
         let mut tasks = Vec::with_capacity(chunk.len());
         for range in chunk {
             let (from, to) = range.clone();
@@ -118,40 +130,48 @@ async fn write_logs_data(chain: Chain) -> Result<()> {
         }
 
         let elapsed = Instant::now() - start_time;
-        println!("elapsed time is {}ms", elapsed.as_millis());
+        //println!("elapsed time is {}ms", elapsed.as_millis());
         if elapsed > Duration::from_secs(5) {
-            println!("sleeping for 5 seconds");
+            //println!("sleeping for 5 seconds");
             sleep(Duration::from_secs(5)).await;
             start_time = Instant::now();
         }
         let total_elapsed = Instant::now() - time;
-        println!("Chunk processed, moving to next chunk");
-        println!("Total elapsed time is {}ms", total_elapsed.as_millis());
+        //println!("Chunk processed, moving to next chunk");
+        //println!("Total elapsed time is {}ms", total_elapsed.as_millis());
     }
 
-    println!("All tasks finished");
+    //println!("All tasks finished");
 
     let flattened_results = logs.iter().flatten().collect::<Vec<&Log>>();
-    println!("Total logs: {}", flattened_results.len());
+    println!("Total buys: {}", flattened_results.len());
     let path = format!("logs_{}.csv", chain.get_chain_data().id);
     let file = File::create(path)?;
 
+    let mut total_boster_used = 0.0;
     for log in flattened_results {
         let event = parse_log::<BoostedEvent>(log.clone());
         match event {
             Ok(event) => {
+                let total_locked = format_units(event.total_locked,"ether").unwrap().parse::<f64>().unwrap();
+                let boosted = total_locked - ( total_locked / chain.get_chain_data().match_rate );
+                let airdrop = boosted / chain.get_chain_data().booster_total * chain.get_chain_data().aidrop_total ;
+                total_boster_used += boosted;
                 writeln!(
                     &file,
-                    "{},{},{}",
+                    "{},{},{},{},{}",
                     event.timestamp,
-                    format_units(event.total_locked, "ether").unwrap(),
-                    to_checksum(&event.locker, None)
+                    boosted,
+                    airdrop,
+                    to_checksum(&event.locker, None),
+                    parse_units(airdrop, "ether").unwrap(),
                 )?;
             }
             Err(e) => panic!("Error parsing log: {:?}", e),
         }
     }
 
+    println!("Booster used: {}%", total_boster_used / chain.get_chain_data().booster_total * 100.0 );
     Ok(())
 }
 
@@ -161,7 +181,7 @@ async fn get_logs(
     from: U64,
     to: U64,
 ) -> Result<Vec<Log>, ProviderError> {
-    println!("Getting logs from {} to {}", from, to);
+    //println!("Getting logs from {} to {}", from, to);
     client
         .get_logs(
             &Filter::new()
