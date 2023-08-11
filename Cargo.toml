@@ -1,5 +1,5 @@
 [package]
-name = "rust-veloci-data"
+name = "rust_velocimeter_data"
 version = "0.1.0"
 edition = "2021"
 
@@ -14,3 +14,6 @@ futures = "0.3.28"
 eyre = "0.6"
 # env variable from .env
 dotenv = "0.15.0"
+
+[build-dependencies]
+ethers = { version = "2.0", features = ["abigen"] }

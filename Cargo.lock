@@ -2322,7 +2322,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-veloci-data"
+name = "rust_velocimeter_data"
 version = "0.1.0"
 dependencies = [
  "dotenv",

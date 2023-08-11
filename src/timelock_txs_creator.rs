@@ -1,4 +1,3 @@
-use ethers::contract::abigen;
 use ethers::prelude::SignerMiddleware;
 use ethers::providers::{Http, Middleware, Provider};
 use ethers::signers::{LocalWallet, Signer};
@@ -9,8 +8,7 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::Arc;
 
-abigen!(Timelock, "./src/abis/Timelock.json");
-abigen!(ERC20, "./src/abis/ERC20.json");
+use rust_velocimeter_data::bindings::{Timelock, ERC20};
 
 const RPC_URL: &str = "https://base.blockpi.network/v1/rpc/public";
 const TIMELOCK_ADDRESS: &str = "0xa36b73043ded64586aaf28d3a70fa9a20bc514fc";
@@ -31,6 +29,7 @@ pub async fn create_tx(transfer_amount: U256) -> Result<()> {
 
         SignerMiddleware::new(provider, wallet)
     });
+
     let timelock = Timelock::new(parse_hardcoded_addy(TIMELOCK_ADDRESS), client.clone());
     let bvm = ERC20::new(
         BVM_ADDRESS
