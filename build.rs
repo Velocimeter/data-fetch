@@ -2,11 +2,8 @@ use ethers::prelude::Abigen;
 
 fn main() {
     rust_file_generation("ERC20", "./abi/ERC20.json", "./src/bindings/erc20.rs");
-    rust_file_generation(
-        "Timelock",
-        "./abi/Timelock.json",
-        "./src/bindings/timelock.rs",
-    );
+    rust_file_generation("oTOKEN", "./abi/oTOKEN.json", "./src/bindings/otoken.rs");
+    rust_file_generation("Gauge", "./abi/Gauge.json", "./src/bindings/gauge.rs");
 }
 
 fn rust_file_generation(name: &str, abi_source: &str, path: &str) {

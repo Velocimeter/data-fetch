@@ -1,122 +1,179 @@
-mod airdrop_scipt;
-mod timelock_txs_creator;
-
-use std::io;
+use axum::{extract::Path, http::StatusCode, response::Json, routing::get, Extension, Router};
+use ethers::types::U64;
+use sea_orm::{Database, DatabaseConnection, EntityTrait};
+use std::{net::SocketAddr, sync::Arc};
+use tracing::{info, instrument};
 
 use dotenv::dotenv;
-use ethers::{
-    types::{U256, U64},
-    utils::parse_units,
-};
-use eyre::Result;
+use std::env;
 
-use airdrop_scipt::write_logs_data;
+mod writer_options_data;
+use writer_options_data::write_options_data;
 
-const FANTOM_RPC_URL: &str = "https://fantom.blockpi.network/v1/rpc/public";
-const CANTO_RPC_URL: &str = "https://velocimeter.tr.zone/";
-const PULSE_RPC_URL: &str = "https://rpc.pulsechain.com";
+use rust_velocimeter_data::database::o_token_datas::Entity as OTokenDatas;
+use rust_velocimeter_data::database::o_token_datas::Model as OTokenData;
 
-const FANTOM_BOOSTER_ADDRESS: &str = "0xbD777Af905F603797CFC1E8eBa229DaD26FE4863";
-const CANTO_BOOSTER_ADDRESS: &str = "0xacBDa0a9AF99f391C5994Dd5b262E04c778eeBE7";
-const PULSE_BOOSTER_ADDRESS: &str = "0xC5d4E462b96cC73283EB452B15147c17Af413313";
+// const MANTLE_RPC_URL: &str = "https://rpc.mantle.xyz/";
 
+const FANTOM_O_TOKEN: &str = "0xF9EDdca6B1e548B0EC8cDDEc131464F462b8310D";
+const BASE_O_TOKEN: &str = "0x762eb51D2e779EeEc9B239FFB0B2eC8262848f3E";
+// const MANTLE_O_TOKEN: &str = "0x3b19B8EC75BBf85848d133F1a47710EeEd57Bd90";
+
+const FANTOM_GAUGE: &str = "0xa3643a5d5b672a267199227cd3e95ed0b41dbd52";
+const BASE_GAUGE: &str = "0x3f5129112754d4fbe7ab228c2d5e312b2bc79a06";
+// const MANTLE_GAUGE: &str = "0x43072ee491c57de81971fb804e0ea5f4836a073d";
+
+const MULTICALL_ADDRESS: &str = "0xcA11bde05977b3631167028862bE2a173976CA11";
+
+#[derive(Debug)]
 pub struct ChainData {
-    id: u32,
+    id: i32,
     rpc_url: String,
-    booster_address: String,
+    o_token_address: String,
+    native_gauge_address: String,
     from_block: U64,
-    booster_total: f64,
-    aidrop_total: f64,
-    match_rate: f64,
+    rpc_step: i32,
+    multicall_address: String,
 }
 
+#[derive(Debug)]
 pub enum Chain {
     Fantom(ChainData),
-    Canto(ChainData),
-    Pulse(ChainData),
+    Base(ChainData),
+    Mantle(ChainData),
 }
 
 impl Chain {
     fn get_chain_data(&self) -> &ChainData {
         match self {
             Chain::Fantom(data) => data,
-            Chain::Canto(data) => data,
-            Chain::Pulse(data) => data,
+            Chain::Base(data) => data,
+            Chain::Mantle(data) => data,
         }
     }
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     dotenv().ok();
 
-    println!("Input operation type:");
-    println!("1 for airdrop script, 2 for timelock tx creation");
+    tracing_subscriber::fmt().init();
 
-    let mut operation = String::new();
+    info!("Tracing initialized");
 
-    io::stdin()
-        .read_line(&mut operation)
-        .expect("Failed to read operation");
+    tokio::spawn(syncer());
 
-    let operation: u32 = operation.trim().parse().expect("Please type a number!");
+    server().await;
+}
 
-    match operation {
-        1 => {
-            let fantom_chain = Chain::Fantom(ChainData {
-                id: 250,
-                rpc_url: FANTOM_RPC_URL.to_string(),
-                booster_address: FANTOM_BOOSTER_ADDRESS.to_string(),
-                from_block: U64::from(66450156),
-                booster_total: 5263.0,
-                aidrop_total: 210000.0,
-                match_rate: 1.02,
-            });
-            let canto_chain = Chain::Canto(ChainData {
-                id: 7700,
-                rpc_url: CANTO_RPC_URL.to_string(),
-                booster_address: CANTO_BOOSTER_ADDRESS.to_string(),
-                from_block: U64::from(5313097),
-                booster_total: 1000.0,
-                aidrop_total: 210000.0,
-                match_rate: 1.01,
-            });
-            let pulse_chain = Chain::Pulse(ChainData {
-                id: 369,
-                rpc_url: PULSE_RPC_URL.to_string(),
-                booster_address: PULSE_BOOSTER_ADDRESS.to_string(),
-                from_block: U64::from(17917480),
-                booster_total: 2359213.0,
-                aidrop_total: 120000.0,
-                match_rate: 1.01,
-            });
+async fn server() {
+    let db_url = env::var("DATABASE_URL").expect("Should be defined in .env");
 
-            let chains = vec![fantom_chain, canto_chain, pulse_chain];
+    // set up connection
+    let conn = Database::connect(db_url)
+        .await
+        .expect("Could not connect to database");
 
-            for chain in chains {
-                println!("Chain {}", chain.get_chain_data().id);
-                write_logs_data(chain).await?;
-            }
-        }
-        2 => {
-            println!("Input amount to transfer:");
+    // build our application with some routes
+    let app = Router::new()
+        .route("/", get(root))
+        .route("/options-data/:chain_id", get(give_options_data))
+        .layer(Extension(conn));
 
-            let mut amount = String::new();
+    // run it with hyper
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    info!("listening on {}", addr);
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+}
 
-            io::stdin()
-                .read_line(&mut amount)
-                .expect("Failed to read amount");
+#[instrument]
+async fn syncer() {
+    let db_url = env::var("DATABASE_URL").expect("Should be defined in .env");
 
-            let amount: f64 = amount.trim().parse().expect("Type a floating number!");
-            let pu = parse_units(amount.to_string(), "ether").unwrap();
-            let transfer_amount = U256::from(pu);
-            timelock_txs_creator::create_tx(transfer_amount).await?;
-        }
-        _ => {
-            println!("Invalid operation type");
-            return Ok(());
-        }
+    // set up connection
+    let conn = Database::connect(db_url)
+        .await
+        .expect("Could not connect to database");
+
+    let conn: Arc<_> = Arc::new(conn);
+
+    let fantom_chain = Chain::Fantom(ChainData {
+        id: 250,
+        rpc_url: env::var("FANTOM_RPC_URL")
+            .expect("Should be defined in .env")
+            .to_string(),
+        o_token_address: FANTOM_O_TOKEN.to_string(),
+        native_gauge_address: FANTOM_GAUGE.to_string(),
+        from_block: U64::from(64965262),
+        rpc_step: 1_024,
+        multicall_address: MULTICALL_ADDRESS.to_string(),
+    });
+    let base_chain = Chain::Base(ChainData {
+        id: 8453,
+        rpc_url: env::var("BASE_RPC_URL")
+            .expect("Should be defined in .env")
+            .to_string()
+            .to_string(),
+        o_token_address: BASE_O_TOKEN.to_string(),
+        native_gauge_address: BASE_GAUGE.to_string(),
+        from_block: U64::from(1963125),
+        rpc_step: 1_024,
+        multicall_address: MULTICALL_ADDRESS.to_string(),
+    });
+    // let mantle_chain = Chain::Mantle(ChainData {
+    //     id: 5000,
+    //     rpc_url: MANTLE_RPC_URL.to_string(),
+    //     o_token_address: MANTLE_O_TOKEN.to_string(),
+    //     native_gauge_address: MANTLE_GAUGE.to_string(),
+    //     from_block: U64::from(51025),
+    //     rpc_step: 1_024,
+    //     multicall_address: MULTICALL_ADDRESS.to_string(),
+    // });
+
+    let chains = vec![
+        fantom_chain,
+        base_chain,
+        //   mantle_chain
+    ];
+
+    for chain in chains {
+        let pool = Arc::clone(&conn);
+        tokio::spawn(async move {
+            write_options_data(chain, pool).await.unwrap();
+        });
     }
+}
 
-    Ok(())
+#[axum_macros::debug_handler]
+async fn give_options_data(
+    Path(chain_id): Path<i32>,
+    Extension(conn): Extension<DatabaseConnection>,
+) -> Result<Json<OTokenData>, StatusCode> {
+    info!("chain_id: {}", chain_id);
+    let res = OTokenDatas::find_by_id(chain_id)
+        .one(&conn)
+        .await
+        .map_err(internal_error)?;
+
+    match res {
+        Some(data) => Ok(Json(data.into())),
+        None => Err(StatusCode::NOT_FOUND),
+    }
+}
+
+/// Utility function for mapping any error into a `500 Internal Server Error`
+/// response.
+fn internal_error<E>(_err: E) -> StatusCode
+where
+    E: std::error::Error,
+{
+    StatusCode::INTERNAL_SERVER_ERROR
+}
+
+// basic handler that responds with a static string
+async fn root() -> &'static str {
+    "Hello, World!"
 }
