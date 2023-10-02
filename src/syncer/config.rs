@@ -1,0 +1,11 @@
+// const MANTLE_RPC_URL: &str = "https://rpc.mantle.xyz/";
+
+pub const FANTOM_O_TOKEN: &str = "0xF9EDdca6B1e548B0EC8cDDEc131464F462b8310D";
+pub const BASE_O_TOKEN: &str = "0x762eb51D2e779EeEc9B239FFB0B2eC8262848f3E";
+// const MANTLE_O_TOKEN: &str = "0x3b19B8EC75BBf85848d133F1a47710EeEd57Bd90";
+
+pub const FANTOM_GAUGE: &str = "0xa3643a5d5b672a267199227cd3e95ed0b41dbd52";
+pub const BASE_GAUGE: &str = "0x3f5129112754d4fbe7ab228c2d5e312b2bc79a06";
+// const MANTLE_GAUGE: &str = "0x43072ee491c57de81971fb804e0ea5f4836a073d";
+
+pub const MULTICALL_ADDRESS: &str = "0xcA11bde05977b3631167028862bE2a173976CA11";

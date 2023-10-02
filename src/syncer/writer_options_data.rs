@@ -1,5 +1,3 @@
-// use crate::o_token_datas::average_lock_time;
-use super::{internal_error, Chain};
 use axum::http::StatusCode;
 use ethers::{abi::Address, contract::Multicall, prelude::*};
 use eyre::Result;
@@ -14,6 +12,9 @@ use rust_velocimeter_data::bindings::{ExerciseLpFilter, Gauge};
 use rust_velocimeter_data::database::o_token_datas::{
     ActiveModel as OTokenData, Column as OTokenDatasColumn, Entity as OTokenDatas,
 };
+
+use crate::server::internal_error;
+use crate::syncer::types::Chain;
 
 #[instrument(skip(chain, conn))]
 pub async fn write_options_data(chain: Chain, conn: Arc<DatabaseConnection>) -> Result<()> {
