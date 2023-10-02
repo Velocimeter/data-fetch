@@ -1,6 +1,6 @@
 use ethers::types::U64;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ChainData {
     pub id: i32,
     pub rpc_url: String,
@@ -11,7 +11,7 @@ pub struct ChainData {
     pub multicall_address: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Chain {
     Fantom(ChainData),
     Base(ChainData),

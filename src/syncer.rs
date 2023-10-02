@@ -1,8 +1,10 @@
 use ethers::types::U64;
-use sea_orm::Database;
+use futures::future::join_all;
+use sea_orm::{Database, DatabaseConnection};
 use std::env;
 use std::sync::Arc;
-use tracing::instrument;
+use tokio::time::{sleep, Duration};
+use tracing::{info, instrument};
 
 mod config;
 mod types;
@@ -15,6 +17,10 @@ use writer_options_data::write_options_data;
 #[instrument]
 pub async fn syncer() {
     let db_url = env::var("DATABASE_URL").expect("Should be defined in .env");
+    let iteration_time_secs = env::var("ITERATION_TIME_SECS")
+        .expect("Should be defined in .env")
+        .parse::<u64>()
+        .expect("Should be a number");
 
     // set up connection
     let conn = Database::connect(db_url)
@@ -62,10 +68,24 @@ pub async fn syncer() {
         //   mantle_chain
     ];
 
+    iteration_run(chains.clone(), Arc::clone(&conn)).await;
+
+    let six_hours = Duration::from_secs(iteration_time_secs);
+    loop {
+        info!("Sleeping for {} seconds", six_hours.as_secs());
+        sleep(six_hours).await;
+        iteration_run(chains.clone(), Arc::clone(&conn)).await;
+    }
+}
+
+async fn iteration_run(chains: Vec<Chain>, conn: Arc<DatabaseConnection>) {
+    let mut tasks = vec![];
     for chain in chains {
         let pool = Arc::clone(&conn);
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             write_options_data(chain, pool).await.unwrap();
         });
+        tasks.push(task);
     }
+    join_all(tasks).await;
 }
